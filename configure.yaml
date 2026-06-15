@@ -1,0 +1,13 @@
+---
+- name: Configure Alpine on rpi
+  hosts: rpi
+  become: true
+  gather_facts: false
+  vars:
+    sdcard: "/dev/disk/by-id/mmc-USD00_0x7008781a"
+  
+  vars_files:
+    - env.yaml
+
+  tasks:
+    # TODO

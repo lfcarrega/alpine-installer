@@ -1,0 +1,298 @@
+---
+- name: Install Alpine on rpi
+  hosts: rpi
+  become: true
+  gather_facts: false
+  vars:
+    sdcard: "/dev/disk/by-id/mmc-USD00_0x7008781a"
+    luks_mapped_name: "cryptroot"
+  
+  vars_files:
+    - env.yaml
+
+  pre_tasks:
+    - name: Install Python
+      ansible.builtin.raw: apk update && apk add python3 parted cryptsetup doas util-linux lvm2 mesa-dri-gallium e2fsprogs dosfstools mkinitfs
+      changed_when: false
+      tags: mkinitfs
+
+  tasks:
+    - name: Change Root Password
+      ansible.builtin.user:
+        name: root
+        password: "{{ root_pwd | password_hash('sha512') }}"
+
+    - name: Ensure group "wheel" exists
+      ansible.builtin.group:
+        name: wheel
+        state: present
+
+    - name: Create a user 'u0' with a home directory
+      ansible.builtin.user:
+        name: u0
+        create_home: yes
+        password: "{{ user_pwd | password_hash('sha512') }}"
+        groups: audio,input,video,netdev,wheel
+
+    - name: Create .ssh dir for user u0
+      ansible.builtin.file:
+        path: /home/u0/.ssh
+        state: "directory"
+        owner: u0
+        group: u0
+        mode: '0700'
+
+    - name: Create .ssh/authorized_keys for user u0
+      ansible.builtin.copy:
+        dest: /home/u0/.ssh/authorized_keys
+        content: |
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII1M4Qb3ZEKfOj/E8Ml35LGsu6ephDWPfHwOr7UWnd5K
+        owner: u0
+        group: u0
+        mode: '0644'
+
+    - name: Create /etc/doas.d dir
+      ansible.builtin.file:
+        path: /etc/doas.d
+        state: "directory"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Setup /etc/doas.d/20-wheel.conf
+      ansible.builtin.copy:
+        dest: /etc/doas.d/20-wheel.conf
+        content: |
+          permit persist :wheel
+        mode: '0644'
+
+    - name: Run blkdiscard on specified sdcard
+      ansible.builtin.shell: "blkdiscard -f {{ sdcard }}"
+
+    - name: Force kernel to reload partition table (partprobe)
+      ansible.builtin.command: "partprobe"
+      changed_when: false
+
+    - name: Wait for mdev to finish creating all device symlinks
+      ansible.builtin.command: "mdev -s"
+      changed_when: false
+
+    - name: Create the FAT32 Boot Partition
+      community.general.parted:
+        device: "{{ sdcard }}"
+        number: 1
+        label: gpt
+        part_end: "100MiB"
+        name: "boot"
+        flags: [ boot, esp ]
+        state: present
+
+    - name: Create the LUKS Root Partition
+      community.general.parted:
+        device: "{{ sdcard }}"
+        number: 2
+        label: gpt
+        part_start: "100MiB"
+        part_end: "90%"
+        name: "root"
+        state: present
+
+    - name: Force kernel to reload partition table (partprobe)
+      ansible.builtin.command: "partprobe"
+      changed_when: false
+
+    - name: Wait for mdev to finish creating all device symlinks
+      ansible.builtin.command: "mdev -s"
+      changed_when: false
+
+    - name: Wait for the partition device nodes to appear in the system
+      ansible.builtin.wait_for:
+        path: "{{ sdcard }}-part1"
+        state: present
+        timeout: 10
+
+    - name: Format Partition 1 as FAT32
+      community.general.filesystem:
+        fstype: vfat
+        dev: "{{ sdcard }}-part1"
+        opts: "-F 32 -n BOOT"
+        
+    - name: Check if LUKS container already exists
+      command: "cryptsetup isLuks {{ sdcard }}-part2"
+      register: luks_check
+      failed_when: false
+      changed_when: false
+
+    - name: Format Partition 2 with LUKS encryption
+      command: >
+        cryptsetup luksFormat
+        --batch-mode
+        --type luks2
+        {{ sdcard }}-part2
+      args:
+        stdin: "{{ luks_passphrase }}"
+      when: luks_check.rc != 0
+
+    - name: Open the LUKS encrypted partition
+      command: >
+        cryptsetup open
+        {{ sdcard }}-part2
+        {{ luks_mapped_name }}
+      args:
+        stdin: "{{ luks_passphrase }}"
+      register: luks_open
+      failed_when: 
+        - luks_open.rc != 0
+        - "'already exists' not in luks_open.stderr"
+      changed_when: "luks_open.rc == 0"
+
+    - name: Format the opened LUKS container as EXT4
+      community.general.filesystem:
+        fstype: ext4
+        dev: "/dev/mapper/{{ luks_mapped_name }}"
+        opts: "-L rootfs"
+
+    - name: Ensure the target mount points exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /mnt
+
+    - name: Mount the LUKS encrypted root partition to /mnt
+      ansible.posix.mount:
+        path: /mnt
+        src: "/dev/mapper/{{ luks_mapped_name }}"
+        fstype: ext4
+        state: mounted
+
+    - name: Ensure the boot mount point exists inside /mnt
+      ansible.builtin.file:
+        path: /mnt/boot
+        state: directory
+        mode: '0755'
+
+    - name: Mount the FAT32 boot partition to /mnt/boot
+      ansible.posix.mount:
+        path: /mnt/boot
+        src: "{{ sdcard }}-part1"
+        fstype: vfat
+        state: mounted
+
+    - name: Generate Alpine answerfile
+      ansible.builtin.copy:
+        dest: /tmp/alpine-answerfile
+        content: |
+          # Use US layout with US variant
+          KEYMAPOPTS="us us"
+
+          # Set hostname to 'alpine'
+          HOSTNAMEOPTS=alpine-rpi
+
+          # Set device manager to udev
+          DEVDOPTS=udev
+
+          # Contents of /etc/network/interfaces
+          INTERFACESOPTS="auto lo
+          iface lo inet loopback
+
+          auto eth0
+          iface eth0 inet dhcp
+          hostname alpine-rpi
+          "
+
+          # DNS
+          DNSOPTS="-n 192.168.15.4"
+
+          # Set timezone to UTC
+          TIMEZONEOPTS="UTC"
+
+          PROXYOPTS=none
+
+          # Add first mirror (CDN) - Option -1
+          # Enable the community repo - Option -c
+          APKREPOSOPTS="-1 -c"
+
+          # Create user
+          USEROPTS="-a -g audio,input,video,netdev u0"
+          USERSSHKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII1M4Qb3ZEKfOj/E8Ml35LGsu6ephDWPfHwOr7UWnd5K"
+
+          # Install OpenSSH and add a SSH key for the root user
+          SSHDOPTS=openssh
+          #ROOTSSHKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII1M4Qb3ZEKfOj/E8Ml35LGsu6ephDWPfHwOr7UWnd5K"
+
+          # Use openntpd
+          NTPOPTS="openntpd"
+
+          # Use /mnt as a sys disk
+          DISKOPTS="-m sys /mnt"
+
+          LBUOPTS=none
+
+          APKCACHEOPTS=none
+
+    - name: Run setup-alpine
+      command: >
+        setup-alpine -e -f /tmp/alpine-answerfile
+
+    - name: Get UUID from {{ sdcard }}-part1
+      ansible.builtin.command: >
+        blkid -s UUID -o value {{ sdcard }}-part1
+      register: boot_uuid
+      changed_when: false
+      tags: cmdline
+
+    - name: Get UUID from {{ sdcard }}-part2
+      ansible.builtin.command: >
+        blkid -s UUID -o value {{ sdcard }}-part2
+      register: luks_uuid
+      changed_when: false
+      tags: cmdline
+
+    - name: Get UUID from /dev/mapper/cryptroot
+      ansible.builtin.command: >
+        blkid -s UUID -o value /dev/mapper/cryptroot
+      register: rootfs_uuid
+      changed_when: false
+      tags: cmdline
+
+    - name: Add needed features to mkinitfs (cryptsetup)
+      ansible.builtin.copy:
+        dest: /mnt/etc/mkinitfs/mkinitfs.conf
+        content: |
+          features="base mmc usb ext4 lvm keymap cryptsetup"
+        mode: '0644'
+
+    - name: Fix /boot/cmdline.txt
+      ansible.builtin.copy:
+        dest: /mnt/boot/cmdline.txt
+        content: |
+          console=tty1 cryptroot=UUID={{ luks_uuid.stdout }} cryptdm=alpine-rootfs root=/dev/mapper/alpine-rootfs modules=sd-mod,usb-storage,ext4 quiet rootfstype=ext4
+      tags: cmdline
+
+    - name: Add /boot/usercfg.txt
+      ansible.builtin.copy:
+        dest: /mnt/boot/usercfg.txt
+        content: |
+          # Enable DRM VC4 V3D driver
+          dtoverlay=vc4-kms-v3d
+          max_framebuffers=2
+
+          # Don't have the firmware create an initial video= setting in cmdline.txt.
+          # Use the kernel's default instead.
+          disable_fw_kms_setup=1
+
+    - name: Fix /etc/fstab
+      ansible.builtin.copy:
+        dest: /mnt/etc/fstab
+        content: |
+          UUID={{ rootfs_uuid.stdout }} / ext4 rw,noatime 0 1
+          UUID={{ boot_uuid.stdout }} /boot vfat rw,noatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,errors=remount-ro 0 2
+          tmpfs /tmp tmpfs nosuid,nodev 0 0
+
+    - name: Regenerate initramfs with mkinitfs
+      ansible.builtin.shell: >
+        mkinitfs -c /mnt/etc/mkinitfs/mkinitfs.conf -b /mnt/ $(ls /mnt/lib/modules/)
+      tags: mkinitfs
+        
