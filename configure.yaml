@@ -1,13 +1,141 @@
 ---
 - name: Configure Alpine on rpi
-  hosts: rpi
-  become: true
-  gather_facts: false
+  hosts: rpi-user
+  gather_facts: true
+  remote_user: u0
   vars:
-    sdcard: "/dev/disk/by-id/mmc-USD00_0x7008781a"
+    runtime_dir: "/run/user/{{ ansible_facts['user_id'] if ansible_facts['user_id'] is defined else lookup('pipe', 'id -u {{ remote_user }}') }}"
   
   vars_files:
     - env.yaml
 
   tasks:
-    # TODO
+    - name: Install needed packages
+      community.general.apk:
+        name: 
+          - bluez
+          - brightnessctl
+          - dbus
+          - dbus-openrc
+          - dbus-x11
+          - cage
+          - elogind
+          - firefox-esr
+          - font-dejavu
+          - foot
+          - greetd
+          - greetd-gtkgreet
+          - grim
+          - i3status
+          - iwd
+          - iwgtk
+          - mako
+          - mate-polkit
+          - openrc-user
+          - openrc-user-pam
+          - pipewire
+          - pipewire-pulse
+          - polkit
+          - polkit-elogind
+          - slurp
+          - sway
+          - swaybg
+          - swaylock
+          - swaylockd
+          - swayidle
+          - util-linux-login
+          - waydroid
+          - wireplumber
+          - wl-clipboard
+          - wvkbd
+          - wvkbd-deskintl
+          - wpa_supplicant
+          - xwayland
+        state: present
+        update_cache: true
+      become: true
+      become_method: doas
+      become_user: root
+
+    - name: Init Waydroid with GAPPS
+      ansible.builtin.command: waydroid init -s GAPPS
+      become: true
+      become_method: doas
+      become_user: root
+
+    - name: OpenRC enable required services
+      ansible.builtin.service:
+        name: "{{ item.service_name }}"
+        runlevel: "{{ item.runlevel }}"
+        enabled: true
+      become: true
+      become_method: doas
+      become_user: root
+      loop:
+        - { service_name: 'bluetooth', runlevel: 'default' }
+        - { service_name: 'cgroups', runlevel: 'default' }
+        - { service_name: 'dbus', runlevel: 'default' }
+        - { service_name: 'elogind', runlevel: 'default' }
+        - { service_name: 'polkit', runlevel: 'default' }
+        - { service_name: 'waydroid-container', runlevel: 'default' }
+
+    - name: OpenRC enable required services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+      become: true
+      become_method: doas
+      become_user: root
+      loop:
+        - bluetooth
+        - cgroups
+        - dbus
+        - elogind
+        - polkit
+        - waydroid-container
+
+    - name: Create rc.conf dir
+      ansible.builtin.file:
+        path: ~/.config/rc
+        state: directory
+        mode: '0755'
+      become: false
+
+    - name: Allow propagation of the $WAYLAND_DISPLAY and associated environment variables
+      ansible.builtin.copy:
+        dest: ~/.config/rc/rc.conf
+        content: |
+          rc_env_allow="WAYLAND_DISPLAY"
+      become: false
+
+    - name: Create a custom gui user runlevel
+      ansible.builtin.file:
+        path: ~/.config/rc/runlevels/gui
+        state: directory
+        mode: '0755'
+      become: false
+
+    - name: Create Sway config dir
+      ansible.builtin.file:
+        path: ~/.config/sway
+        state: directory
+        mode: '0755'
+      become: false
+
+    - name: Copy my sway config
+      ansible.builtin.copy:
+        src: files/sway/config
+        dest: ~/.config/sway/config
+      become: false
+
+    - name: Enable user services
+      ansible.builtin.shell: |
+        set -e
+        rc-update -U add dbus gui
+        rc-update -U add mako gui
+        rc-update -U add pipewire gui
+        rc-update -U add pipewire-pulse gui
+        rc-update -U add wireplumber gui
+      environment:
+        XDG_RUNTIME_DIR: "{{ runtime_dir }}"
+      become: false

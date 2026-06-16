@@ -268,7 +268,7 @@
       ansible.builtin.copy:
         dest: /mnt/boot/cmdline.txt
         content: |
-          console=tty1 cryptroot=UUID={{ luks_uuid.stdout }} cryptdm=alpine-rootfs root=/dev/mapper/alpine-rootfs modules=sd-mod,usb-storage,ext4 quiet rootfstype=ext4
+          console=tty1 cryptroot=UUID={{ luks_uuid.stdout }} cryptdm=alpine-rootfs root=/dev/mapper/alpine-rootfs modules=sd-mod,usb-storage,ext4 quiet rootfstype=ext4 psi=1
       tags: cmdline
 
     - name: Add /boot/usercfg.txt
