@@ -3,8 +3,8 @@
 ## Examples
 
 If you're also using Raspberry Pi 5 'Network Boot' like me, don't forget to:
-1. Add the following lines to your dnsmasq config
-   If you're using Pi-hole as your DHCP server, look for `misc.dnsmasq_lines` under Settings -> All settings -> Miscellaneous (https://<PIHOLE_IP>/admin/settings/all)
+1. Add the following lines to your dnsmasq config  
+   If you're using Pi-hole as your DHCP server, look for `misc.dnsmasq_lines` under Settings -> All settings -> Miscellaneous (https://<PIHOLE_IP>/admin/settings/all)  
    Otherwise, just add a /etc/dnsmasq.d/99-pxe.conf file
   ```
   enable-tftp
@@ -15,7 +15,7 @@ If you're also using Raspberry Pi 5 'Network Boot' like me, don't forget to:
 ```sh
 python3 -m http.server 8888 --directory /srv/tftpboot/
 ```
-3. Make sure all the needed files are available under /srv/tftpboot/
+3. Make sure all the needed files are available under /srv/tftpboot/  
   **EXAMPLE**
   ```sh
   root@pihole:/srv/tftpboot/a8aa4364# ls -lah /srv/tftpboot/a8aa4364/
