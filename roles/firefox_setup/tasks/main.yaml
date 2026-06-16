@@ -1,0 +1,52 @@
+- name: Set distribution specific variables
+  ansible.builtin.set_fact:
+    firefox_package: "{{ 'firefox-esr' if ansible_facts['os_family'] == 'Alpine' else 'firefox' }}"
+    firefox_dist_dir: "{{ '/usr/lib/firefox-esr/distribution' if ansible_facts['os_family'] == 'Alpine' else '/usr/lib/firefox/distribution' }}"
+
+- name: Install Firefox
+  ansible.builtin.package:
+    name: "{{ firefox_package }}"
+    state: present
+  become: true
+  become_method: doas
+
+- name: Create Firefox distribution directory
+  ansible.builtin.file:
+    path: "{{ firefox_dist_dir }}"
+    state: directory
+    mode: '0755'
+  become: true
+  become_method: doas
+
+- name: Copy Firefox policies.json
+  ansible.builtin.copy:
+    src: policies.json
+    dest: "{{ firefox_dist_dir }}/policies.json"
+    mode: '0644'
+  become: true
+  become_method: doas
+
+- name: Ensure Firefox profile directory exists
+  ansible.builtin.shell: |
+    timeout 5 {{ firefox_package }} --headless --CreateProfile "default-release" || true
+  args:
+    executable: /bin/sh
+  become: false
+  changed_when: false
+
+- name: Find Firefox profile directory path
+  ansible.builtin.find:
+    paths: "~/.mozilla/firefox"
+    file_type: directory
+    patterns: "*.default-release"
+  register: firefox_profile_folder
+  become: false
+
+- name: Copy user.js to Firefox profile
+  ansible.builtin.copy:
+    src: user.js
+    dest: "{{ item.path }}/user.js"
+    mode: '0644'
+  become: false
+  loop: "{{ firefox_profile_folder.files }}"
+  when: firefox_profile_folder.matched > 0

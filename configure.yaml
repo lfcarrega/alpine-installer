@@ -4,6 +4,7 @@
   gather_facts: true
   remote_user: u0
   vars:
+    ansible_python_interpreter: /usr/bin/python
     runtime_dir: "/run/user/{{ ansible_facts['user_id'] if ansible_facts['user_id'] is defined else lookup('pipe', 'id -u {{ remote_user }}') }}"
   
   vars_files:
@@ -36,6 +37,7 @@
           - openrc-user
           - openrc-user-pam
           - pipewire
+          - pipewire-spa-bluez
           - pipewire-pulse
           - polkit
           - polkit-elogind
@@ -192,3 +194,6 @@
         XDG_RUNTIME_DIR: "{{ runtime_dir }}"
       become: false
 
+    - name: Run Firefox universal setup role
+      ansible.builtin.include_role:
+        name: firefox_setup
