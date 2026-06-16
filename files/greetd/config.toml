@@ -1,0 +1,5 @@
+[default_session]
+command = "sway --config /etc/greetd/sway-config"
+user = "greetd"
+[terminal]
+vt = 7

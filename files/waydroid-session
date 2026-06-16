@@ -1,0 +1,15 @@
+#!/usr/bin/env ash
+
+cage -s -- sh -c '
+    openrc -U gui
+    
+    waydroid session stop 2>/dev/null
+    waydroid session start &
+
+    until waydroid status 2>/dev/null | grep -q "Session:[[:space:]]RUNNING"; do
+        sleep 0.2
+    done
+
+    # Abre a interface gráfica. Quando ela fechar, o Cage fecha.
+    exec waydroid show-full-ui
+'

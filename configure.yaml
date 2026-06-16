@@ -12,7 +12,9 @@
   tasks:
     - name: Install needed packages
       community.general.apk:
-        name: 
+        name:
+          - adwaita-icon-theme
+          - adw-gtk3
           - bluez
           - brightnessctl
           - dbus
@@ -63,6 +65,54 @@
       become_method: doas
       become_user: root
 
+    - name: Copy the sway-session script
+      ansible.builtin.copy:
+        src: files/sway-session
+        dest: /usr/local/bin/sway-session
+        mode: '0755'
+      become: true
+      become_method: doas
+
+    - name: Copy the waydroid-session script
+      ansible.builtin.copy:
+        src: files/waydroid-session
+        dest: /usr/local/bin/waydroid-session
+        mode: '0755'
+      become: true
+      become_method: doas
+
+    - name: Create greetd config dir
+      ansible.builtin.file:
+        path: /etc/greetd
+        state: directory
+        mode: '0755'
+      become: true
+      become_method: doas
+
+    - name: Copy the sway-config used by greetd
+      ansible.builtin.copy:
+        src: files/greetd/sway-config
+        dest: /etc/greetd/sway-config
+        mode: '0755'
+      become: true
+      become_method: doas
+
+    - name: Copy greetd config
+      ansible.builtin.copy:
+        src: files/greetd/config.toml
+        dest: /etc/greetd/config.toml
+        mode: '0644'
+      become: true
+      become_method: doas
+
+    - name: Copy greetd environments file
+      ansible.builtin.copy:
+        src: files/greetd/environments
+        dest: /etc/greetd/environments
+        mode: '0644'
+      become: true
+      become_method: doas
+
     - name: OpenRC enable required services
       ansible.builtin.service:
         name: "{{ item.service_name }}"
@@ -76,6 +126,7 @@
         - { service_name: 'cgroups', runlevel: 'default' }
         - { service_name: 'dbus', runlevel: 'default' }
         - { service_name: 'elogind', runlevel: 'default' }
+        - { service_name: 'greetd', runlevel: 'default' }
         - { service_name: 'polkit', runlevel: 'default' }
         - { service_name: 'waydroid-container', runlevel: 'default' }
 
@@ -91,6 +142,7 @@
         - cgroups
         - dbus
         - elogind
+        - greetd
         - polkit
         - waydroid-container
 
@@ -139,3 +191,4 @@
       environment:
         XDG_RUNTIME_DIR: "{{ runtime_dir }}"
       become: false
+

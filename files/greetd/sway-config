@@ -1,0 +1,2 @@
+exec wvkbd-deskintl
+exec "gtkgreet -s /usr/share/themes/adw-gtk3-dark/gtk-3.0/gtk.css; swaymsg exit"
