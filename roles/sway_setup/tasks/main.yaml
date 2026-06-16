@@ -1,0 +1,12 @@
+- name: Create Sway config dir
+  ansible.builtin.file:
+    path: ~/.config/sway
+    state: directory
+    mode: '0755'
+  become: false
+
+- name: Copy my sway config
+  ansible.builtin.copy:
+    src: config
+    dest: ~/.config/sway/config
+  become: false

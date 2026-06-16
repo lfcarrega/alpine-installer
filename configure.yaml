@@ -36,6 +36,7 @@
           - mate-polkit
           - openrc-user
           - openrc-user-pam
+          - playerctl
           - pipewire
           - pipewire-spa-bluez
           - pipewire-pulse
@@ -169,19 +170,6 @@
         mode: '0755'
       become: false
 
-    - name: Create Sway config dir
-      ansible.builtin.file:
-        path: ~/.config/sway
-        state: directory
-        mode: '0755'
-      become: false
-
-    - name: Copy my sway config
-      ansible.builtin.copy:
-        src: files/sway/config
-        dest: ~/.config/sway/config
-      become: false
-
     - name: Enable user services
       ansible.builtin.shell: |
         set -e
@@ -193,6 +181,10 @@
       environment:
         XDG_RUNTIME_DIR: "{{ runtime_dir }}"
       become: false
+
+    - name: Run Sway setup role
+      ansible.builtin.include_role:
+        name: sway_setup
 
     - name: Run Firefox universal setup role
       ansible.builtin.include_role:
