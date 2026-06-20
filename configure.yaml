@@ -132,6 +132,7 @@
         - { service_name: 'greetd', runlevel: 'default' }
         - { service_name: 'polkit', runlevel: 'default' }
         - { service_name: 'waydroid-container', runlevel: 'default' }
+        - { service_name: 'ntpd', runlevel: 'default' }
 
     - name: OpenRC enable required services
       ansible.builtin.service:
