@@ -56,6 +56,15 @@
           - wvkbd-deskintl
           - wpa_supplicant
           - xwayland
+          - flatpak
+          - xdg-user-dirs
+          - wireguard-tools
+          - neovim
+          - bash
+          - bash-completion
+          - gstreamer
+          - gst-plugins-base
+          - gst-plugins-good
         state: present
         update_cache: true
       become: true
@@ -150,6 +159,16 @@
         - polkit
         - waydroid-container
 
+    - name: Add flathub
+      ansible.builtin.command: flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      become: true
+      become_method: doas
+      become_user: root
+
+    - name: Add flathub for the current user
+      ansible.builtin.command: flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      become: false
+
     - name: Create rc.conf dir
       ansible.builtin.file:
         path: ~/.config/rc
@@ -190,3 +209,4 @@
     - name: Run Firefox universal setup role
       ansible.builtin.include_role:
         name: firefox_setup
+
