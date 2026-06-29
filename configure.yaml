@@ -65,6 +65,11 @@
           - gstreamer
           - gst-plugins-base
           - gst-plugins-good
+          - waybar
+          - virt-manager
+          - incus
+          - incus-client
+          - bridge
         state: present
         update_cache: true
       become: true
@@ -142,8 +147,9 @@
         - { service_name: 'polkit', runlevel: 'default' }
         - { service_name: 'waydroid-container', runlevel: 'default' }
         - { service_name: 'ntpd', runlevel: 'default' }
+        - { service_name: 'incusd', runlevel: 'default' }
 
-    - name: OpenRC enable required services
+    - name: OpenRC start required services
       ansible.builtin.service:
         name: "{{ item }}"
         state: started
@@ -158,6 +164,7 @@
         - greetd
         - polkit
         - waydroid-container
+        - incusd
 
     - name: Add flathub
       ansible.builtin.command: flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -210,3 +217,161 @@
       ansible.builtin.include_role:
         name: firefox_setup
 
+    - name: Add bridge interface
+      ansible.builtin.copy:
+        dest: /etc/network/interfaces
+        content: |
+          auto lo
+          iface lo inet loopback
+          iface lo inet6 loopback
+
+          auto br0
+          iface br0
+            bridge_ports eth0
+            bridge_stp off
+            address 192.168.15.7/24
+            gateway 192.168.15.1
+            address fd5d:d97c:25d5:1::7/64
+            gateway fe80::920a:62ff:fe4f:28d0
+      become: true
+      become_method: doas
+      become_user: root
+
+    - name: Configure resolvconf
+      ansible.builtin.copy:
+        dest: /etc/network/interfaces
+        content: |
+          resolv_conf=/etc/resolv.conf
+          name_servers="192.168.15.4 fd5d:d97c:25d5:1::4"
+      become: true
+      become_method: doas
+      become_user: root
+
+    - name: Init incus with a preseed file
+      ansible.builtin.command:
+        cmd: incus admin init --preseed
+        stdin: "{{ lookup('ansible.builtin.file', 'files/incus/preseed.yaml') }}"
+      changed_when: false
+      become: true
+      become_method: doas
+      become_user: root
+      tags:
+        - incus
+
+    - name: Set the pi-hole incus profile
+      ansible.builtin.command:
+        cmd: incus profile create pihole
+        stdin: "{{ lookup('ansible.builtin.file', 'files/incus/profiles/pihole.yaml') }}"
+      register: incus_profile_pihole
+      failed_when: 
+        - incus_profile_pihole.rc != 0
+        - "'already exists' not in incus_profile_pihole.stderr and 'already exists' not in incus_profile_pihole.stdout"
+      changed_when: incus_profile_pihole.rc == 0
+      become: true
+      become_method: doas
+      become_user: root
+      tags: incus
+
+    - name: Create pi-hole container
+      ansible.builtin.command:
+        cmd: >
+          incus launch images:debian/13/cloud pihole --profile default --profile pihole
+      register: incus_launch_pihole
+      failed_when: 
+        - incus_profile_pihole.rc != 0
+        - "'already exists' not in incus_profile_pihole.stderr and 'already exists' not in incus_profile_pihole.stdout"
+      changed_when: incus_profile_pihole.rc == 0
+      become: true
+      become_method: doas
+      become_user: root
+      tags: incus
+
+- name: Configure Pi-hole
+  hosts: pihole
+  gather_facts: yes
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  vars_files:
+    - env.yaml
+
+  tasks:
+    - name: Check pihole-FTL command
+      ansible.builtin.shell: which pihole-FTL
+      register: pihole_status
+      changed_when: false
+      failed_when: false
+
+    - name: Manual Pi-hole setup
+      ansible.builtin.pause:
+        prompt: |
+          SSH into your your Pi-hole instance and proceed with the installation using this command:
+          curl -sSL https://install.pi-hole.net | bash
+      when: pihole_status.rc != 0
+
+    - name: Install needed packages
+      ansible.builtin.apt:
+        pkg:
+          - dnscrypt-proxy
+          - wireguard-tools
+
+    - name: Copy dnscrypt-proxy config
+      ansible.builtin.copy:
+        src: files/dnscrypt-proxy/dnscrypt-proxy.toml
+        dest: /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+        backup: true
+    
+    - name: Copy dnscrypt-proxy cloaking-rules
+      ansible.builtin.copy:
+        src: files/dnscrypt-proxy/cloaking-rules.txt
+        dest: /etc/dnscrypt-proxy/cloaking-rules.txt
+        backup: true
+
+    - name: Copy dnscrypt-proxy forwarding-rules
+      ansible.builtin.copy:
+        src: files/dnscrypt-proxy/forwarding-rules.txt
+        dest: /etc/dnscrypt-proxy/forwarding-rules.txt
+        backup: true
+
+    - name: Ensure the /etc/systemd/system/dnscrypt-proxy.socket.d dir exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/dnscrypt-proxy.socket.d
+        state: directory
+        mode: '0755'
+
+    - name: Set the dnscrypt-proxy systemd override
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/dnscrypt-proxy.socket.d/override.conf
+        mode: '0644'
+        content: |
+          [Socket]
+          ListenStream=
+          ListenDatagram=
+          ListenStream=127.0.0.1:5053
+          ListenDatagram=127.0.0.1:5053
+      notify: Restart dnscrypt-proxy socket
+
+    - name: Force systemd-resolved config file
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf
+        backup: yes
+        content: |
+          # Managed by Ansible
+          [Resolve]
+          DNS=127.0.0.1 ::1
+          Domains=~.
+          Cache=no
+      notify: Restart systemd-resolved
+
+  handlers:
+    - name: Restart dnscrypt-proxy socket
+      ansible.builtin.systemd_service:
+        name: dnscrypt-proxy.socket
+        state: reloaded
+    - name: Restart systemd-resolved
+      ansible.builtin.service:
+        name: systemd-resolved
+        state: restarted
+        enabled: yes
+  

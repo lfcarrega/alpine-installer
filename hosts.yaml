@@ -1,10 +1,14 @@
 all:
   hosts:
     rpi:
-      ansible_host: 192.168.15.144
+      ansible_host: 192.168.15.7
       ansible_port: 22
       ansible_user: root
     rpi-user:
-      ansible_host: 192.168.15.144
+      ansible_host: 192.168.15.7
       ansible_port: 22
       ansible_user: u0
+    pihole:
+      ansible_host: 192.168.15.8
+      ansible_port: 22
+      ansible_user: root
