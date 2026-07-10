@@ -9,4 +9,5 @@
   ansible.builtin.copy:
     src: config
     dest: ~/.config/sway/config
+    mode: "0644"
   become: false
